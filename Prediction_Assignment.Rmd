@@ -1,0 +1,97 @@
+---
+title: "Prediction Assignment"
+author: "Simon Krabbe"
+date: "23 September 2018"
+output: html_document
+---
+
+##Overview
+
+Six young health participants performed one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Data were collected from accelerometers on the belt, forearm, arm, and dumbell.
+
+The data come from this source: http:/groupware.les.inf.puc-rio.br/har. Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+```{r, echo = TRUE}
+
+#load packages, import data, set seed
+
+library(caret)
+library(randomForest)
+library(ggplot2)
+library(GGally)
+
+training <- read.csv("~\\Statistics\\COURSERA\\pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv("~\\Statistics\\COURSERA\\pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+
+set.seed(123)
+
+#split into "training_sub" and "validating", the model is developed on "training_sub" and validated on "validating"
+
+inTrain <- createDataPartition(y=training$classe, p=0.7, list=FALSE)
+training_sub <- training[inTrain,]
+validating <- training[-inTrain,]
+
+#some numeric variables were imported as factor variables, change these to numeric
+
+for(i in 8:159){
+      if(is.factor(training_sub[,i])==TRUE) {training_sub[,i] <- as.numeric(as.character(training_sub[,i]))}
+}
+for(i in 8:159){
+      if(is.factor(validating[,i])==TRUE) {validating[,i] <- as.numeric(as.character(validating[,i]))}
+}
+for(i in 8:159){
+      if(is.factor(testing[,i])==TRUE) {testing[,i] <- as.numeric(as.character(testing[,i]))}
+      }
+
+#keep only variables with no NA values
+
+keep_variables <- names(which(colMeans(is.na(training_sub)) == 0))
+training_sub <- training_sub[, keep_variables]
+validating <- validating[, keep_variables]
+testing <- testing[, c(keep_variables[1:59], "problem_id")]
+dim(training_sub); dim(validating); dim(testing)
+table(training_sub$user_name, training_sub$classe)
+
+```
+
+Thus, "training_sub" consists of 13737 rows and 60 columns, and "validating" consists of 5885 rows and 60 columns, while "testing" consists of 20 rows and 60 columns.
+
+All 6 participants provide severel hundred lines of data for each classe (i.e. A, lifting the weights correctly, or B/C/D/E, lifting the weights but making one of four typical mistakes).
+
+To explore the data, principal component analysis was performed.
+
+```{r, echo = TRUE}
+
+#principal component analysis
+
+pca <- prcomp(training_sub[,c(8:59)], center = TRUE, scale. = TRUE)
+pca_df <- data.frame(PC1 = pca$x[,1], PC2 = pca$x[,2], PC3 = pca$x[,3], PC4 = pca$x[,4], PC5 = pca$x[,5], PC6 = pca$x[,6], PC7 = pca$x[,7], PC8 = pca$x[,8], PC9 = pca$x[,9], PC10 = pca$x[,10], PC11 = pca$x[,11], PC12 = pca$x[,12], user_name = training_sub$user_name, classe = training_sub$classe)
+
+ggplot(pca_df, aes(x = PC1, y = PC2, colour = user_name)) + geom_jitter(alpha = 0.2) + ggtitle("Colours shows 6 different persons")
+ggplot(pca_df, aes(x = PC1, y = PC2, colour = classe)) + geom_jitter(alpha = 0.2) + ggtitle("Colours show 5 different classes")
+
+```
+
+From these two plots of the two main principal components, it appears that most of the variation in the data is between the 6 participants. Contrary, the classes A/B/C/D/E cluster around each participant. Thus, to discriminate between the classes, I choose a tree-based method to take account of interactions between the participants and the other variables, and not some linear model.
+
+I chose random forest, and I first did a manual grid search across mtry and nodesize holding ntree = 50. I found mtry = 15 and nodesize = 2 to provide the best accuracy on the validation set. Hereafter I ran the model with ntree = 1000. Accuracy on the validation set was above 0.99.
+
+```{r, echo = TRUE}
+
+#random forest, train model
+
+model_rf <- randomForest(x = training_sub[,c(2,8:59)], y = training_sub$classe, ntree = 1000, mtry = 15, nodesize = 2)
+model_rf
+
+#use model on validation set
+
+confusionMatrix(validating$classe, predict(model_rf, validating[,c(2,8:59)]))
+
+#use model on test set
+
+predict(model_rf, testing, type = "class")
+
+```
+
